@@ -1,0 +1,4 @@
+deprecated
+data/processed/curated_extended_selection_table_420_kHz.RDS
+data/processed/curated_extended_selection_table.RDS
+data/processed/phyllostomid_call_est.RDS

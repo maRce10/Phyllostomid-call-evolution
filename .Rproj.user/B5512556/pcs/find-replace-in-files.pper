@@ -1,0 +1,16 @@
+{
+    "dialog-state": {
+        "query": "curated_extended_selection_table",
+        "path": "~/Dropbox/Projects",
+        "regex": false,
+        "caseSensitive": false,
+        "wholeWord": false,
+        "filePatterns": [],
+        "useGitGrep": false,
+        "excludeGitIgnore": true,
+        "excludeFilePatterns": [],
+        "resultsCount": 12,
+        "errorCount": 0,
+        "replaceErrors": ""
+    }
+}

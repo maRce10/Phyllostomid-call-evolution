@@ -1,0 +1,1220 @@
+---
+title: <center><font size="6"><b>Acoustic analysis</b></font></center>
+subtitle: <center><font size="4"><b>Thyroptera response call ontogeny</b></font></center>
+author: <center><font size="4"><a href="http://marceloarayasalas.weebly.com/">Marcelo Araya-Salas, PhD</a></font></center>
+date: <center>`r format(Sys.Date(), "%d-%m-%Y")`</center>
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+fontsize: 12pt 
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r packages, message=FALSE, warning = FALSE, echo = FALSE, eval = TRUE, include = FALSE}
+
+rm(list = ls())
+
+# unload all non-based packages
+out <- sapply(paste('package:', names(sessionInfo()$otherPkgs), sep = ""), function(x) try(detach(x, unload = FALSE, character.only = TRUE), silent = T))
+
+## add 'developer/' to packages to be installed from github
+x <- c("warbleR", "pbapply", "Rraven", "parallel", "monitoR", "ggplot2", "cowplot", "pracma", "viridis", "corrplot", "caret", "lme4", "ranger", "MASS", "kableExtra")
+
+aa <- lapply(x, function(y) {
+  
+  # get pakage name
+  pkg <- strsplit(y, "/")[[1]]
+  pkg <- pkg[length(pkg)]
+  
+  # check if installed, if not then install 
+  if (!pkg %in% installed.packages()[,"Package"])  {
+
+      if (grepl("/", y))  devtools::install_github(y, force = TRUE) else
+    install.packages(y) 
+    }
+
+  # load package
+  try(require(pkg, character.only = T), silent = T)
+})
+
+```
+
+```{r functions, eval = TRUE, echo = FALSE}
+
+warbleR_options(wav.path = "~/Dropbox/Projects/Ontogenia respuesta Thyroptera/grabaciones/", wl = 300, parallel = parallel::detectCores() - 1, bp = "frange", fast = F, threshold = 15, ovlp = 90)
+
+```
+
+
+```{r lspec, eval = FALSE, echo = FALSE}
+
+check_wavs()
+# 
+wi <- wav_info(path = "~/Dropbox/Projects/Ontogenia respuesta Thyroptera/grabaciones/")
+
+unique(wi$sample.rate)
+unique(wi$bits)
+# fix_wavs(samp.rate = 400, bit.depth = 16)
+
+lspec(flim = c(35, 180), sxrow = 1, rows = 12, ovlp = 20, fast.spec = TRUE)
+
+move_imgs(from = "~/Dropbox/Projects/Ontogenia respuesta Thyroptera/grabaciones/", to = "~/Dropbox/Projects/Ontogenia respuesta Thyroptera/long_spectrograms2/")
+
+
+```
+
+```{r metadata, eval = FALSE, echo = FALSE}
+
+# check metadata
+mt.dt <- readxl::read_xlsx("1_Datos cambios ontogénicos respuesta.xlsx")
+
+# read sound files
+wvs <- list.files("./grabaciones/")
+
+# extract file number
+wv.df <- data.frame(sound.files = wvs, file.number = as.numeric(gsub(".wav", "", sapply(strsplit(wvs, "_"), "[[", 3))))
+
+# add sound file name
+mt.dt$sound.files <- sapply(1:nrow(mt.dt), function(x) wv.df$sound.files[wv.df$file.number == mt.dt$`Documento de sonido`[x]][1])
+
+## recordings wanted
+mt.dt$`Documento de sonido`[mt.dt$Respondió == "si" & is.na(mt.dt$sound.files)]
+
+write.csv(mt.dt, "metadata Thyroptera call ontogeny.csv", row.names = FALSE)
+```
+
+```{r autodetec, eval = FALSE, echo = FALSE}
+
+#selec long spectrograms and detect on good ones
+ls.imgs <- list.files("./long_spectrograms/goodones/")
+img <- sapply(strsplit(ls.imgs, "-p"), "[[", 1)
+page <- as.numeric(gsub(".jpeg", "", sapply(strsplit(ls.imgs, "-p"), "[[", 2)))
+
+#put it in a data frane
+imgdf <- data.frame(sound.files = paste0(img, ".wav"), page, stringsAsFactors = FALSE)
+
+imgdf$selec <- imgdf$page
+
+# get start and end
+# because lspec was 1s & 12 rows
+imgdf$start <- (imgdf$page - 1) * 12
+imgdf$end <- imgdf$page * 12
+
+
+# oldad <- ad
+# autodetec on ranges of pages for each sound file 
+ad <- autodetec(X = imgdf, threshold = 1, mindur= 0.0001, maxdur = 0.2, bp = c(35, 150), img = FALSE, ssmooth = 200)
+
+# save non-detected
+no_dtct <- ad[is.na(ad$start), ]
+
+# exclude non-detected
+ad <- ad[!is.na(ad$start), ]
+
+# add call ID
+out <- lapply(unique(ad$sound.files), function(x)
+{x
+  X <-ad[ad$sound.files == x, ]
+
+  X$gap <- c(NA, X$start[-1] - X$end[-nrow(X)])
+
+  X$call <- 1
+
+  if (nrow(X) > 1)
+  for(i in 2:nrow(X))
+   X$call[i] <- if(X$gap[i] > 0.03) X$call[i - 1] + 1  else X$call[i - 1]
+
+  return(X)
+})
+
+adid <- do.call(rbind, out)
+
+fr_ad <- freq_range(X = adid, bp = c(35, 84), fsmooth = 0.001, ovlp = 90, 
+                          threshold = 5, img = FALSE, flim = c(30, 120))
+
+fr_ad$bottom.freq[is.na(fr_ad$bottom.freq)] <- mean(fr_ad$bottom.freq, na.rm = TRUE)
+fr_ad$top.freq[is.na(fr_ad$top.freq)] <- mean(fr_ad$top.freq, na.rm = TRUE)
+
+write.csv(fr_ad, "automatic detections Thyroptera ontogeny.csv", row.names = FALSE)
+
+specreator(fr_ad, flim = c(30, 190), ovlp = 90, by.song = "call", xl = 3, fast.spec = TRUE, dest.path = "~/Dropbox/Projects/Ontogenia respuesta Thyroptera/autodetec/", title.labels = c("sound.files", "call"))
+
+```
+
+```{r exp to raven, eval = FALSE, echo = FALSE}
+
+ad <- read.csv("automatic detections Thyroptera ontogeny.csv", stringsAsFactors = FALSE)
+
+length(unique(ad$call))
+
+exp_raven(X = ad, file.name = "automatic selection Raven format.txt", sound.file.path =  .Options$warbleR$path)
+
+ad2 <- ad[!duplicated(ad$sound.files, ad$call), ]
+
+table(ad2$sound.files, ad2$call)
+
+```
+
+```{r inquiry xcorr templates, eval = FALSE, echo = FALSE}
+
+#read raven selection for inquiry templates
+inq.sels <- imp_raven(sound.file.col = "Begin File")
+
+# selec the selection file 
+inq.sels <- inq.sels[inq.sels$selec.file == "T2018-03-28_09-10-15_0000030.Table.1.selections.Inquiry_calls.txt", ]
+
+# order by time
+inq.sels <- inq.sels[order(inq.sels$start), ]
+
+# get gaps
+gaps <- inq.sels$start[-1] - inq.sels$end[-nrow(inq.sels)]
+
+# find mean gap duration
+mean(gaps)
+sd(gaps)
+
+# rename selec
+inq.sels$selec <- 1:nrow(inq.sels)
+
+# make template name
+inq.sels$tmplt <- paste0("inqr_", inq.sels$selec)
+
+# create templates
+tmplts <- pblapply(1:nrow(inq.sels), cl = detectCores() - 1, function(x){
+  
+    tmplt <- makeCorTemplate(file.path(.Options$warbleR$wav.path, inq.sels$sound.files[x]), t.lim=c(inq.sels$start[x],inq.sels$end[x]),wl = 300, ovlp = 90, frq.lim=c(inq.sels$bottom.freq[x], inq.sels$top.freq[x]), dens = 0.5, name = inq.sels$tmplt[x], high.pass = min(inq.sels$bottom.freq))
+    title(main = inq.sels$tmplt[x], score.cutoff = 0.9)  
+    
+    return(tmplt)
+})
+
+# set names 
+names(tmplts) <- inq.sels$tmplt 
+
+#remove 7th (it's noise)
+tmplts <- tmplts[-7]
+
+# combine all templates
+comb.tmplts <- do.call(combineCorTemplates, tmplts)
+
+# get correlation scores
+cr.mtchs <- corMatch(survey = inq.sels$sound.files[1], templates = comb.tmplts, parallel = TRUE, show.prog = T, time.source = "fileinfo", cor.method = "pearson", warn = FALSE)
+
+# find peaks
+dtcts <- findPeaks(cr.mtchs, parallel = TRUE)
+
+# extract peaks
+peaks <- getDetections(dtcts)
+
+# remove date column
+peaks$date.time <- NULL
+
+# set cutoff
+cutoff <- 0.5
+
+peaks <- peaks[peaks$score > cutoff, ]
+
+# number of detections per template
+table(peaks$template)
+
+
+# mean detection to other than themselves
+tapply(peaks$score[peaks$score < 0.95], peaks$template[peaks$score < 0.95], mean)
+
+# peak for best
+peaks[peaks$template == "inqr_6", ]
+
+# compare to real times of inquiries
+inq.sels[ , c("start", "end", "tmplt")]
+
+# save best template (6)
+
+inqr_6 <- getTemplates(comb.tmplts, which.ones = "inqr_6")
+
+writeCorTemplates(inqr_6)
+
+```
+
+```{r detect on files, eval = FALSE, echo = FALSE}
+
+inqr_6 <- readCorTemplates("inqr_6.ct")
+
+ad <- read.csv("automatic detections Thyroptera ontogeny.csv", stringsAsFactors = FALSE)
+
+# get sound files where response calls were found
+wvs <- unique(ad$sound.files)
+
+# create templates
+cormtchs <- pblapply(wvs, cl = detectCores() - 1, function(x){
+
+  # get correlations    
+  cm <- corMatch(survey = file.path(.Options$warbleR$wav.path, x), templates = inqr_6, parallel = FALSE, show.prog = FALSE, time.source = "fileinfo", cor.method = "pearson", warn = FALSE)
+
+  # find peaks
+  dtcts <- findPeaks(cm, parallel = FALSE)
+
+  # extract peaks
+  peaks <- getDetections(dtcts)
+  
+  # remove date column
+  peaks$date.time <- NULL
+
+  # add sound file
+  peaks$sound.files <- x
+  
+  # order columns
+  peaks <- peaks[ , c(4, 1:3)]
+  
+  return(peaks)
+  })
+
+
+cormtch <- do.call(rbind, cormtchs)
+
+cormtch$selec <- 1:nrow(cormtch)
+cormtch$start <- cormtch$time - (inqr_6@templates$inqr_6@duration / 2)
+cormtch$end <- cormtch$time + (inqr_6@templates$inqr_6@duration / 2)
+cormtch$bottom.freq <- inqr_6@templates$inqr_6@frq.lim[1]
+cormtch$top.freq <- inqr_6@templates$inqr_6@frq.lim[2]
+
+mean(tapply(cormtch$template, list(cormtch$template, cormtch$sound.files), length))
+
+write.csv(cormtch, "Inquiry call detections.csv", row.names = FALSE)
+
+```
+
+```{r check detections, eval = FALSE, echo = FALSE}
+
+cormtch <- read.csv("Inquiry call detections.csv", stringsAsFactors = FALSE)
+
+bad.cormtch <- cormtch[cormtch$score <= 0.5, ]
+
+good.cormtch <- cormtch[cormtch$score > 0.5, ]
+
+good.cormtch$score <- round(good.cormtch$score, 2)
+
+mean(tapply(good.cormtch$template, list(good.cormtch$template, good.cormtch$sound.files), length))
+
+#goodones
+specreator(good.cormtch, flim = c(10, 40), ovlp = 90, fast.spec = FALSE, dest.path = "~/Dropbox/Projects/Ontogenia respuesta Thyroptera/Inquiry_detections/goodones/", title.labels = c("score"), mar = 0.01, collevels = seq(-100, 0, 5))
+
+#badones
+specreator(bad.cormtch, flim = c(10, 40), ovlp = 90, fast.spec = FALSE, dest.path = "~/Dropbox/Projects/Ontogenia respuesta Thyroptera/Inquiry_detections/badones/", title.labels = c("score"), mar = 0.01, collevels = seq(-100, 0, 5))
+
+flcormtch <- filter_sels(X = cormtch, path = "~/Dropbox/Projects/Ontogenia respuesta Thyroptera/Inquiry_detections/goodones/", missing = FALSE)
+
+write.csv(flcormtch, "inquiry call selections.csv", row.names = FALSE)
+```
+
+```{r selec the 5 response calls after inquiry calls, eval = FALSE, echo = FALSE}
+
+flcormtch <- read.csv("inquiry call selections.csv", stringsAsFactors = FALSE)
+
+flcormtch$call.type <- "inquiry"
+
+flcormtch$call <- NA
+
+ad <- read.csv("automatic detections Thyroptera ontogeny.csv", stringsAsFactors = FALSE)
+
+ad$call.type <- "response"
+
+call_ad <- song_param(ad, song_colm = "call")
+
+# set number of response calls after inquiry to be used
+n.calls <- 2
+
+out <- pblapply(unique(flcormtch$sound.files), cl = detectCores() - 1, function(x){
+  
+  # subset of inquiry calls
+  Y <- flcormtch[flcormtch$sound.files == x, ]
+    
+  X <- ad[ad$sound.files == x, ]
+    
+  W <- call_ad[call_ad$sound.files == x, ]
+  
+  # intersect of column names
+  int.nms <- intersect(names(X), names(Y))
+  
+  out <- lapply(1:nrow(Y), function(y){
+  
+    # call_ad subset
+    Z <- W[W$start > Y$end[y], ]
+    
+    # ad subset
+    if(nrow(Z) > 0)
+    {
+    Q <- X[X$call %in% min(Z$call):(min(Z$call) + n.calls - 1), ]
+    
+    K <- rbind(Y[y, int.nms], Q[, int.nms])
+    } else K <- NA
+    
+    return(K)
+  })
+
+  out <- out[sapply(out, class) == "data.frame"]
+  sl.calls <- do.call(rbind, out)  
+ 
+  return(sl.calls) 
+})
+
+sl.calls <- do.call(rbind, out) 
+
+# remove duplicates
+sl.calls <- sl.calls[!duplicated(sl.calls[, c("sound.files", "start", "end")]), ]
+
+
+# number of calls per sound files
+ncps <- tapply(sl.calls$call, sl.calls$sound.files, function(x) length(unique(x)))
+
+quantile(ncps)
+
+nrow(sl.calls)
+
+write.csv(sl.calls, "Selected response and inquiry calls.csv", row.names = FALSE)
+
+```
+
+```{r add manually fixed selections, eval = FALSE, echo = FALSE}
+
+fix_ad <- imp_raven(sound.file.col = "Begin File")
+fix_ad$call <- imp_raven(all.data = TRUE)$call
+
+fix_ad <- fix_ad[fix_ad$selec.file == "automatic selection Raven format.txt",]
+
+fix_ad$call.type <- "response"
+fix_ad$channel.Channel <- fix_ad$channel.channel <- fix_ad$selec.file <- NULL
+
+sl.calls <- read.csv("Selected response and inquiry calls.csv", stringsAsFactors = FALSE)
+sl.calls$channel <- 1
+
+sub_fix_ad <- fix_ad[paste(fix_ad$sound.files, fix_ad$call) %in% unique(paste(sl.calls$sound.files, sl.calls$call)),]
+
+
+fix.calls <- rbind(sub_fix_ad, sl.calls[sl.calls$call.type == "inquiry",])
+ 
+fix.calls <- fix.calls[order(fix.calls$sound.files, fix.calls$start), ]
+
+# check number of calls per sound file (should be the same in most cases)
+data.frame(a = tapply(sl.calls$call, sl.calls$sound.files, function(x) length(unique(x))), b= tapply(fix.calls$call, fix.calls$sound.files, function(x) length(unique(x))))
+
+
+write.csv(fix.calls, "Partially manually fixed selected response and inquiry calls.csv", row.names = FALSE)
+
+```
+
+```{r export raven 2, eval = FALSE, echo = FALSE}
+
+sl.calls <- read.csv("Partially manually fixed selected response and inquiry calls.csv", stringsAsFactors = FALSE)
+
+exp_raven(X = sl.calls, file.name = "Partially manually fixed selected response and inquiry calls Raven format.txt", sound.file.path =  .Options$warbleR$wav.path)
+
+```
+
+```{r import fixed raven selections and measure acoustic parameters, eval = FALSE, echo = FALSE}
+
+#read raven selection for inquiry templates
+sls <- imp_raven(sound.file.col = "Begin File", all.data = FALSE, pb = FALSE)
+sls2 <- imp_raven(sound.file.col = "Begin File", all.data = TRUE, pb = FALSE)
+
+# add call and call type columns
+sls$call <- sls2$call
+sls$call.type <- sls2$call.type
+rm(sls2)
+
+# sort columns
+sls <- sort_colms(sls)
+
+# selec the selection file 
+sls <- sls[sls$selec.file == "Manually fixed selected response and inquiry calls Raven format.txt", ]
+
+sls$View <- sls$`Begin Path` <- sls$`File Offset (s)` <- sls$old.selec <- sls$`Delta Time (s)` <- sls$gap <- NULL
+
+# order by time
+sls <- sls[order(sls$sound.files, sls$start), ]
+
+# remove inquiry calls
+sls <- sls[sls$call.type != "inquiry", ]
+
+# read metadata
+mt.dt <- read.csv("metadata Thyroptera call ontogeny.csv", stringsAsFactors = FALSE)
+
+# selec only sound files in metadata
+sls <- sls[sls$sound.files %in% mt.dt$sound.files, ]
+
+# add metadata
+out <- lapply(unique(sls$sound.files), function(x) {
+  
+  X <- sls[sls$sound.files == x, ]
+  X$indiv <- mt.dt$Individuo[which(mt.dt$sound.files == x)][1]
+  X$indiv <- mt.dt$Grupo[which(mt.dt$sound.files == x)][1]
+  X$flaps <- ifelse(mt.dt$Aletea[which(mt.dt$sound.files == x)][1] == "si", "yes", "no")
+  X$date <- mt.dt$Fecha[which(mt.dt$sound.files == x)][1]
+  X$sex <- mt.dt$Sexo[which(mt.dt$sound.files == x)][1]
+  X$forearm <- mt.dt$Antebrazo[which(mt.dt$sound.files == x)][1]
+  
+  return(X)
+  })
+
+sls <- do.call(rbind, out)
+
+cs <- check_sels(sls, pb = FALSE)
+
+
+# get spectral parameters
+sp.sls <- specan(sls, fast = FALSE)
+
+# check NAs
+sapply(sp.sls, function(x) sum(is.na(x)))
+
+# remove columns
+sp.sls$sound.files <- sp.sls$selec <- sp.sls$top.freq <- sp.sls$bottom.freq <- sp.sls$meanpeakf <- NULL
+
+# add measures
+sp.sls <- data.frame(sls, sp.sls)
+
+# remove more columns
+sp.sls$channel <- sp.sls$channel.Channel <- sp.sls$channel.channel <- NULL
+
+# force date format
+sp.sls$date <- as.Date(sp.sls$date, format = "%d-%m-%Y")  
+
+
+# time difference from first recording
+out <- lapply(unique(sp.sls$indiv), function(x){ 
+  
+  X <- sp.sls[sp.sls$indiv == x, ]
+  
+  X$date <- as.Date(X$date)
+  
+  X$date.diff <- X$date  - min(X$date)
+
+  return(X)  
+  })
+
+sp.sls <- do.call(rbind, out)
+
+sp.sls$indiv <- as.character(sp.sls$indiv)
+
+write.csv(sp.sls, "Spectral parameters by selection response calls.csv", row.names = FALSE)
+
+```
+
+```{r call level parameters, eval = FALSE, echo = FALSE}
+
+# read data spectral parameters
+sp.sls <- read.csv("Spectral parameters by selection response calls.csv", stringsAsFactors = FALSE)
+
+# dates per individual
+tapply(sp.sls$date, sp.sls$indiv, function(x) length(unique(x)))
+
+# fix entropy standarizing by syllable duration
+# sp.sls$entropy <- sp.sls$entropy / sp.sls$duration
+sp.sls$entropy <- lm(entropy ~ duration, data = sp.sls)$residuals
+
+# measure song parameters
+sp.call <- song_param(sp.sls, song_colm = "call", sd = TRUE, mean_colm = c("duration", "meanfreq", "entropy", "modindx", "peakf", "dfrange", "skew"))
+
+sp.call$cv.duration <- sp.call$duration / sp.call$sd.duration
+
+sp.call$cv.meanfreq <- sp.call$meanfreq / sp.call$sd.meanfreq
+
+sp.call$cv.entropy <- sp.call$entropy / sp.call$sd.entropy
+
+sp.call$cv.modindx <- sp.call$modindx / sp.call$sd.modindx
+
+sp.call$cv.skew <- sp.call$skew / sp.call$sd.skew
+
+sp.call$cv.dfrange <- sp.call$dfrange / sp.call$sd.dfrange
+
+
+sp.call <- merge(sp.call, sp.sls[!duplicated(sp.sls$sound.files), c("sound.files", "indiv", "date.diff", "sex", "forearm")], by = "sound.files")
+
+write.csv(sp.call, "Spectral parameters by call response calls.csv", row.names = FALSE)
+
+```
+
+## Forearm vs Age
+```{r age size equation, eval= TRUE, echo = FALSE, warning=FALSE}
+
+grwth <- read.csv("Post natal growth.csv", stringsAsFactors = FALSE)
+
+grwth$id <- as.character(grwth$id)
+
+# extract data by sex
+grwth.f <- grwth[grwth$sex == "F", ]
+grwth.m <- grwth[grwth$sex == "M", ]
+
+# guess asymptote
+aspm <- 40
+
+## models taken from https://bscheng.com/2014/05/07/modeling-logistic-growth-data-in-r/
+
+# starting coefficients for females
+cf <- coef(lm(logit(forearm / aspm)~day, data= grwth.f))
+
+# starting coefficients for males
+cm <- coef(lm(logit(forearm / aspm)~day, data= grwth.m))
+
+#  model for females
+grw.mod.f <- nls(forearm~phi1/(1+exp(-(phi2+phi3*day))),
+ start=list(phi1 = aspm, phi2 = cf[1], phi3 = cf[2]),data = grwth.f, trace = FALSE)
+
+#  model for males
+grw.mod.m <- nls(forearm~phi1/(1+exp(-(phi2+phi3*day))),
+ start=list(phi1 = aspm, phi2 = cm[1], phi3 = cm[2]),data = grwth.m, trace = FALSE)
+
+#set parameters for predictions
+# females
+phi1f <- coef(grw.mod.f)[1]
+phi2f <- coef(grw.mod.f)[2]
+phi3f <- coef(grw.mod.f)[3]
+#males
+phi1m <- coef(grw.mod.m)[1]
+phi2m <- coef(grw.mod.m)[2]
+phi3m <- coef(grw.mod.m)[3]
+
+
+# predict females
+xf <- min(grwth.f$day):max(grwth.f$day)
+
+predf <- data.frame(x = xf, y =  phi1f/(1 + exp( -(phi2f + phi3f * xf)))) 
+predf$sex <- "F"
+
+# predict males
+xm <- min(grwth.m$day):max(grwth.m$day)
+predm <- data.frame(x = xm, y =  phi1m/(1 + exp( -(phi2m + phi3m * xm)))) 
+predm$sex <- "M"
+
+pred <- rbind(predf, predm)
+
+ggplot(data = grwth, aes(x = day, y = forearm, col = sex), pch = 20) +
+  geom_point(size = 3) +
+  scale_color_manual(values = inferno(10, alpha = 0.5)[c(3, 8)]) +
+  geom_line(data=pred, aes(x = x,y = y), size = 2) +
+  labs(y = "Forearm (mm)", y = "Age (days)") +
+  theme_classic(base_size = 12)
+
+```
+
+
+### Predicting age from forearm
+
+* Note that the predictive equation is undefined after forearm ~35 and ~36 for females and males respectively
+
+```{r predict age, eval = TRUE, echo = FALSE, warning=FALSE}
+# y = phi1f/(1 + exp( -(phi2f + phi3f * xf)))
+# 
+# 1 + exp( -(phi2f + phi3f * xf)) =  phi1f/ y
+# 
+# exp( -(phi2f + phi3f * xf)) =  (phi1f/ y) - 1 
+# 
+# -(phi2f + phi3f * xf) =  log((phi1f/ y) - 1) 
+# 
+# phi2f + phi3f * xf =  - log((phi1f/ y) - 1) 
+# 
+# phi3f * xf =  - log((phi1f/ y) - 1)  - phi2f
+# 
+# xf = -(log((phi1f/ y) - 1)  + phi2f) / phi3f
+
+# function to get age from forearm ###
+# females
+pred_age_f <- function(forearm) -(log((phi1f/ forearm) - 1)  + phi2f) / phi3f
+
+pred_age_m <- function(forearm) -(log((phi1m/ forearm) - 1)  + phi2m) / phi3m
+
+yf <- seq(min(grwth.f$forearm), max(grwth.f$forearm), length.out = 100)
+
+#females
+plot(pred_age_f(forearm = yf), yf, xlim = c(0, 140), type = "l", xlab = "age", ylab  = "forearm", col = inferno(10)[3], lwd = 4)
+
+# males
+lines(pred_age_m(forearm = yf), yf, , col = inferno(10)[8], lwd = 4)
+
+```
+
+
+## Exploratory graphs
+
+### Correlation matrix
+```{r exploratory graphs correlation, eval = TRUE, echo = FALSE, fig.width = 10, warning=FALSE}
+
+### RUN 2 PREVIOUS CHUNCKS ###
+
+sp.call <- read.csv("Spectral parameters by call response calls.csv", stringsAsFactors = FALSE)
+
+# change Hembra for Female
+sp.call$sex[sp.call$sex == "H"] <- "F"
+
+# apply age prediction function by sex
+sp.call$age <- ifelse(sp.call$sex == "F", pred_age_f(sp.call$forearm), pred_age_m(sp.call$forearm))
+
+# function undefines for 1 individual above forearm range use for models so set to maximum age in model data range
+sp.call$age[is.na(sp.call$age)] <- pred_age_m(max(grwth.m$forearm) - 0.95)
+
+# change units
+sp.call$indiv <- as.character(sp.call$indiv)
+sp.call$duration <- sp.call$duration * 1000
+sp.call$gap.duration <- sp.call$gap.duration * 1000
+sp.call$song.duration <- sp.call$song.duration * 1000
+
+#correlation among variables
+cm <- cor(sp.call[, c("duration", "meanfreq", "entropy", "modindx", "dfrange", "num.elms", "song.duration", "skew", "song.rate")], use = "pairwise.complete.obs")
+
+colnames(cm) <- rownames(cm) <- c("syll_duration", "mean_freq", "entropy", "modulation_indx", "freq_range", "#_syllables", "call_duration", "skewness", "syll_rate")
+
+corrplot.mixed(corr = cm, order = "hclust", tl.pos = "lt", upper = "ellipse")
+
+
+```
+
+
+### Consistency parameters (CVs)
+ 
+ Correlation matrix
+ 
+```{r exploratory graphs consistency, eval = TRUE, echo = FALSE, fig.width = 10, warning=FALSE}
+
+#correlation among CV variables
+cm <- cor(sp.call[, c("cv.duration", "cv.meanfreq", "cv.entropy", "cv.dfrange", "cv.skew")], use = "pairwise.complete.obs")
+
+colnames(cm) <- rownames(cm) <- c("CV_duration", "CV_mean_freq", "CV_entropy", "CV_freq_range", "CV_skewness")
+
+corrplot.mixed(corr = cm, order = "hclust", tl.pos = "d", upper = "ellipse")
+```
+
+PC's cumulative contribution
+
+```{r exploratory graphs consistency 2, eval = TRUE, echo = FALSE, warning=FALSE}
+
+consist.dat <- sp.call[!is.na(sp.call$cv.dfrange), ]
+
+pca <- prcomp(consist.dat[, c("cv.duration", "cv.meanfreq", "cv.entropy", "cv.dfrange", "cv.skew")], scale. = TRUE)
+
+a <- summary(pca)$importance
+
+pca.contr <- data.frame(PC = paste0("PC", 1:5), t(a))
+
+ggplot(pca.contr, aes(x = PC, y = Cumulative.Proportion)) +
+  geom_col(fill = inferno(10)[6]) + ylab("Cumulative contribution") + 
+  geom_text(aes(x=PC,y=Cumulative.Proportion,label= round(Cumulative.Proportion, 2)),vjust=0) +
+  theme_classic() 
+
+```
+
+Loadings
+
+```{r exploratory graphs consistency 3, eval = TRUE, echo = FALSE, fig.width = 10, , fig.height = 10, warning=FALSE}
+
+loads <- pca$rotation
+
+
+loads <- data.frame(PC = rep(paste0("PC", 1:5), each = 5), var = rep(c("CV_duration", "CV_mean_freq", "CV_entropy", "CV_freq_range", "CV_skewness"), 5), score = c(loads))
+
+ggplot(loads, aes(x = var, y = score)) + 
+  geom_col(fill = inferno(10)[6]) +
+  facet_wrap( ~ PC, nrow = 3) +
+  theme_classic(base_size = 17) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) 
+
+
+consist.dat <- data.frame(consist.dat, pca$x)
+
+```
+
+Correlation on selected parameters
+
+```{r cor selected param, eval = TRUE, echo = FALSE}
+
+
+#selected variables
+#correlation among variables
+sel.vars <- c("duration", "meanfreq", "entropy", "num.elms", "skew", "song.rate", "PC1")
+cm <- cor(consist.dat[, sel.vars], use = "pairwise.complete.obs")
+
+# colnames(cm)[findCorrelation(cm, cutoff = 0.7)]
+
+colnames(cm) <- rownames(cm) <- c("syll_duration", "mean_freq", "entropy", "#_syllables", "skewness", "syll_rate", "PC1_consistency")
+
+corrplot.mixed(corr = cm, order = "hclust", tl.pos = "lt", upper = "ellipse")
+
+```
+
+
+## Scatter plots
+
+```{r exploratory graphs scatterplots, eval = TRUE, echo = FALSE, fig.height = 13, fig.width = 12, warning=FALSE}
+
+# base size for ggplot plots
+bs <- 14
+
+p1 <- ggplot(data = sp.call, aes(x = age, y = duration, col = indiv, shape = sex)) +
+  geom_point() + 
+   geom_line(aes(lty = sex)) +
+   scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+  labs(x = "Age (days)", y = "Syllable duration (ms)") +
+  theme_classic(base_size = bs) + 
+  guides(col = FALSE)
+
+# p2 <- ggplot(data = sp.call, aes(x = age, y = cv.duration, col = indiv, shape = sex)) +
+#   geom_point() + 
+#   geom_line(aes(lty = sex)) +
+#    scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+#   labs(x = "Age (days)", y = "CV syllable duration") +
+#   ylim(c(0, 25)) +
+#   theme_classic(base_size = bs) +
+#   guides(shape = FALSE, lty = FALSE)
+
+p3 <- ggplot(data = sp.call, aes(x = age, y = meanfreq, col = indiv, shape = sex)) +
+  geom_point() + 
+   geom_line(aes(lty = sex)) +
+   scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+  labs(x = "Age (days)", y = "Mean frequency") +
+  theme_classic(base_size = bs) + theme(legend.position="none")
+
+# p4 <- ggplot(data = sp.call, aes(x = age, y = cv.meanfreq, col = indiv, shape = sex)) +
+#   geom_point() +
+#    scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+#    geom_line(aes(lty = sex)) +
+#   labs(x = "Age (days)", y = "CV mean frequency") +
+#   theme_classic(base_size = bs) + 
+#   theme(legend.position="none")
+
+p5 <- ggplot(data = sp.call, aes(x = age, y = entropy, col = indiv, shape = sex)) +
+  geom_point() +
+   scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+   geom_line(aes(lty = sex)) +
+  labs(x = "Age (days)", y = "Mean entropy") +
+  theme_classic(base_size = bs) + 
+  theme(legend.position="none")
+
+# p6 <- ggplot(data = sp.call, aes(x = age, y = cv.entropy, col = indiv, shape = sex)) +
+#   geom_point() +
+#    scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+#    geom_line(aes(lty = sex)) +
+#   labs(x = "Age (days)", y = "CV entropy") +
+#   theme_classic(base_size = bs) + 
+#   ylim(c(0, 100)) +
+#   theme(legend.position="none")
+
+# p7 <- ggplot(data = sp.call, aes(x = age, y = modindx, col = indiv)) +
+#   geom_point() + 
+#    geom_line(aes(lty = sex)) +
+#    scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+#   labs(x = "Age (days)", y = "Modulation index") +
+#   theme_classic(base_size = bs) + 
+#   theme(legend.position="none")
+
+# p8 <- ggplot(data = sp.call, aes(x = age, y = dfrange, col = indiv, shape = sex)) +
+#   geom_point() + 
+#    geom_line(aes(lty = sex)) +
+#    scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+#   labs(x = "Age (days)", y = "Dominant frequency range") +
+#   theme_classic(base_size = bs) + 
+#   theme(legend.position="none")
+
+p9 <- ggplot(data = sp.call, aes(x = age, y = num.elms, col = indiv, shape = sex)) +
+  geom_point() + 
+  geom_line(aes(lty = sex)) +
+   scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+  labs(x = "Age (days)", y = "Mean # of syllables") +
+  theme_classic(base_size = bs) + 
+  theme(legend.position="none")
+
+# p10 <- ggplot(data = sp.call, aes(x = age, y = song.duration, col = indiv, shape = sex)) +
+#   geom_point() + 
+#   geom_line(aes(lty = sex)) +
+#    scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+#   labs(x = "Age (days)", y = "Call duration (ms)") +
+#   theme_classic(base_size = bs) + 
+#   theme(legend.position="none")
+
+p11 <- ggplot(data = sp.call, aes(x = age, y = song.rate, col = indiv, shape = sex)) +
+  geom_point() + 
+   geom_line(aes(lty = sex)) +
+   scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+  labs(x = "Age (days)", y = "Mean syllable rate (syll/s)") +
+  theme_classic(base_size = bs) + 
+  theme(legend.position="none")
+
+p12 <- ggplot(data = sp.call, aes(x = age, y = skew, col = indiv, shape = sex)) +
+  geom_point() + 
+   geom_line(aes(lty = sex)) +
+   scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+  labs(x = "Age (days)", y = "Mean skewness") +
+  theme_classic(base_size = bs) + 
+  theme(legend.position="none")
+
+cv.call <- aggregate(cbind(skew, num.elms) ~ indiv + sound.files + sex, data = sp.call, FUN = function(x) sd(x) / mean(x))
+
+cv.call$age <- aggregate(cbind(skew, num.elms, age) ~ indiv + sound.files + sex, data = sp.call, FUN = mean)$age
+
+# p13 <- ggplot(data = cv.call, aes(x = age, y = num.elms, col = indiv, shape = sex)) +
+#   geom_point() + 
+#    geom_line(aes(lty = sex)) +
+#    scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+#   labs(x = "Age (days)", y = "CV # of syllables") +
+#   theme_classic(base_size = bs) + 
+#   theme(legend.position="none")
+# 
+# p14 <- ggplot(data = cv.call, aes(x = age, y = skew, col = indiv, shape = sex)) +
+#   geom_point() + 
+#    geom_line(aes(lty = sex)) +
+#     scale_color_manual(values = inferno(length(unique(sp.call$indiv)), alpha = 0.6)) +
+#   labs(x = "Age (days)", y = "CV skewness") +
+#   theme_classic(base_size = bs) + 
+#   theme(legend.position="none")
+
+# plot_grid(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, ncol = 2)
+
+p15 <- ggplot(data = consist.dat, aes(x = age, y = PC1, col = indiv, shape = sex)) +
+  geom_point() +
+   geom_line(aes(lty = sex)) +
+    scale_color_manual(values = inferno(length(unique(consist.dat$indiv)), alpha = 0.6)) +
+  labs(x = "Age (days)", y = "Consistency (PC1)") +
+  theme_classic(base_size = bs) +
+  theme(legend.position="none")
+
+
+plot_grid(p1, p3, p5, p9, p11, p12, p15, ncol = 2)
+
+```
+
+## Statistical analysis
+
+Check normality of residuals:
+
+```{r stats, eval = TRUE, echo = FALSE,  fig.height=10}
+
+#  transform PCA1
+# consist.dat$PC1 <- log(consist.dat$PC1 - min(consist.dat$PC1) + 0.01)
+# consist.dat$PC1 <- sqrt(consist.dat$PC1 - min(consist.dat$PC1) + 0.01)
+
+
+# Selecting between with and without interaction
+mods <- lapply(sel.vars, function(x){  
+  # a <- lmer(formula(paste(x, "~ age + sex + (1 | indiv)")), data = if(x == "PC1") consist.dat else sp.call, REML = FALSE)
+  b <- lmer(formula(paste(x, "~ age + sex + age:sex + (1 | indiv)")), data = if(x == "PC1") consist.dat else sp.call, REML = FALSE)     
+  
+#   AIC(a, b)
+#   
+# if(AIC(b) < AIC(a) - 2) return(b) else return(a)
+})
+
+names(mods) <- sel.vars
+
+corr.names <- c("syll_duration", "mean_freq", "entropy", "#_syllables", "skewness", "syll_rate", "PC1_consistency")
+
+par(mfrow = c(4, 2))
+
+out <- lapply(1:length(mods), function(x){
+
+  qqnorm(resid(mods[[x]]), main= corr.names[x], col = inferno(10)[7], pch = 20, cex = 2)
+
+  qqline(resid(mods[[x]]), lty = 2)
+
+  })
+
+```
+
+```{r extract effect sizes, eval = FALSE, echo = FALSE}
+
+# fixed effect size
+out <- lapply(1:length(mods), function(x){
+  
+  fe <- fixef(mods[[x]])
+  suppressMessages(ci <- confint(mods[[x]]))
+  
+ res <-  data.frame(response = corr.names[x], predictor = rownames(ci)[4:nrow(ci)], effect_size = fe[-1], CI_2.5 = ci[4:nrow(ci), 1], CI_97.5 = ci[4:nrow(ci), 2], stringsAsFactors = FALSE)
+  
+ return(res)
+})
+
+eff.size <- do.call(rbind, out)
+
+rownames(eff.size) <- 1:nrow(eff.size)
+
+
+write.csv(eff.size, "Effect sizes glmm models call ontogeny.csv", row.names = FALSE)
+
+```
+
+
+## Effect sizes and confidence intervals
+
+```{r effect sizes plot, eval = TRUE, echo = FALSE}
+
+eff.size <- read.csv("Effect sizes glmm models call ontogeny.csv", stringsAsFactors = FALSE)
+
+ggplot(eff.size, aes(x = predictor, y = effect_size)) + 
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_point(col = inferno(10)[6], size = 2.5) +
+  geom_errorbar(aes(ymin=CI_2.5, ymax=CI_97.5), width=.05, col = inferno(10)[5], size = 1.2) +
+  facet_wrap( ~ response, ncol = 2, scales = "free_y") +
+  theme_classic(base_size = 12) +
+  coord_flip()
+
+```
+
+
+Only sex:
+
+```{r effect sizes plot only sex, eval = TRUE, echo = FALSE}
+
+ggplot(eff.size[eff.size$predictor == "sexM", ], aes(x = response, y = effect_size)) + 
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_point(col = inferno(10)[6], size = 2.5) +
+  geom_errorbar(aes(ymin=CI_2.5, ymax=CI_97.5), width=.05, col = inferno(10)[5], size = 1.2) +
+  theme_classic(base_size = 12) +
+  coord_flip()
+
+
+```
+
+Only age:
+
+```{r effect sizes plot only age, eval = TRUE, echo = FALSE}
+
+ggplot(eff.size[eff.size$predictor == "age", ], aes(x = response, y = effect_size)) + 
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_point(col = inferno(10)[6], size = 2.5) +
+  geom_errorbar(aes(ymin=CI_2.5, ymax=CI_97.5), width=.05, col = inferno(10)[5], size = 1.2) +
+  theme_classic(base_size = 12) +
+  coord_flip()
+
+
+```
+
+
+Interaction between sex and age:
+
+```{r effect sizes plot iteraction, eval = TRUE, echo = FALSE}
+
+ggplot(eff.size[eff.size$predictor == "age:sexM", ], aes(x = response, y = effect_size)) + 
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_point(col = inferno(10)[6], size = 2.5) +
+  geom_errorbar(aes(ymin=CI_2.5, ymax=CI_97.5), width=.05, col = inferno(10)[5], size = 1.2) +
+  theme_classic(base_size = 12) +
+  coord_flip()
+
+
+```
+
+
+
+
+## Ontogeny of response call individuality
+
+
+- Range of ages between 1 and 70 split in 4 periods (after 70 days the sample size drops) 
+
+- Same number of individuals per period (6, those with highest n) and same number of calls per individual (6 calls). This simplify the comparison of classification accuracy across segments. 
+
+- Calls within individual were randomly sub-sampled and the process was iterated 100 times.
+
+- Mean and SD values are calculated from the 100 replicates.
+
+- DFA and Random Forest accuracy were measured with cross-validation (out-of-bag error) in which each case is classified with a model that did not include that case for training. 
+
+
+```{r ontogeny of individuality, eval = FALSE, echo = FALSE}
+
+sp.call <- sp.call[order(sp.call$age),]
+
+ac <- age.class <- cut(sp.call$age[sp.call$age < 70], breaks = 4)
+
+sp.call$age.class <- c(age.class, rep(NA, nrow(sp.call) - length(age.class)))
+
+tapply(sp.call$indiv[sp.call$age < 70], age.class, function(x) length(unique(x)))
+
+vrs <- c("duration", "meanfreq",  "entropy", "num.elms", "skew", "song.rate", "indiv")
+
+pp <- preProcess(sp.call[, vrs], method = "BoxCox", cutoff = 0.7)
+
+sp.call2 <- predict(pp, sp.call)
+
+# sp.call2 <- sp.call
+
+
+dats <- lapply(na.omit(unique(sp.call2$age.class)), function(x) {
+  
+    X <- sp.call[which(sp.call2$age.class == x), vrs]
+
+    
+  X <- X[complete.cases(X), ]
+
+   # select 6 with highest sample size
+  tab <- table(X$indiv)
+  X <- X[X$indiv %in% names(tab)[order(-tab)][1:6], ]
+  
+  X$age.class <- x
+  
+  return(X)
+})
+
+
+# minimum sample size per individual
+min.n <- min(sapply(dats, function(x) table(x$indiv)))
+
+# 
+out2 <- replicate(100, {out <- lapply(dats, function(X)
+{  
+
+  # selec min.n samples per individual
+  X <- X[rownames(X) %in% unlist(tapply(rownames(X), X$indiv, sample, min.n)), ]
+  
+  age.class <- unique(ac)[X$age.class[1]]
+  X$age.class <- NULL
+  
+  # run random forest
+  rf <- ranger(indiv ~ ., data = X, num.trees = 1000, importance = "impurity")
+  rf.error <- rf$prediction.error
+  
+  # discriminant function
+  dfa <- lda(indiv ~ ., data = X, CV =TRUE)
+  df.error <-  1- sum(diag(table(X$indiv, dfa$class, dnn = c('Actual Group','Predicted Group')))) / nrow(X) 
+  
+return(data.frame(age.class, sample.size = nrow(X), individuals = length(unique(X$indiv)), method = c("RandomForest", "DFA"),  cv.error = c(rf.error, df.error)))
+})
+
+do.call(rbind, out)
+
+}, simplify = FALSE)
+
+rep.res <- do.call(rbind, out2)
+
+agg <- aggregate(cv.error ~ age.class + method + sample.size + individuals, data = rep.res, mean)
+agg$sd <- aggregate(cv.error ~ age.class + method + sample.size + individuals, data = rep.res, sd)$cv.error
+
+write.csv(agg, "Classification accuracy by ontogenetic period.csv", row.names = FALSE)
+```
+
+```{r ontogeny of individuality plots, eval = TRUE, echo = FALSE}
+
+agg <- read.csv("Classification accuracy by ontogenetic period.csv", stringsAsFactors = FALSE)
+
+agg$age.class <- factor(agg$age.class, levels = unique(agg$age.class))
+
+agg$cv.error <- round(agg$cv.error, 2)
+agg$sd <- round(agg$sd, 3)
+
+ggplot(agg, aes(x = age.class, y = cv.error, col = method)) + 
+  geom_point(size = 2.5, position = position_dodge(width = 1)) +
+  geom_errorbar(aes(ymin = cv.error - sd, ymax = cv.error + sd), width=.05, size = 1.2, position = position_dodge(width = 1)) +
+    scale_color_manual(values = inferno(10, alpha = 0.5)[c(3, 8)]) +
+  labs(x = "Age class (days)", y = "Classification error (CV)") +
+  theme_classic(base_size = 12) 
+
+```
+
+### Sample sizes
+
+```{r, eval = TRUE, echo = FALSE}
+
+kbl <- kable(agg[, 1:4], align = "c", row.names = F,  format = "html")
+
+kbl <-  kable_styling(kbl, bootstrap_options = "striped", font_size = 14)
+
+kbl
+```
+
+
+```{r ontogeny of sex differences, eval = FALSE, echo = FALSE}
+
+sp.call <- sp.call[order(sp.call$age),]
+
+ac <- age.class <- cut(sp.call$age[sp.call$age < 70], breaks = 4)
+
+sp.call$age.class <- c(age.class, rep(NA, nrow(sp.call) - length(age.class)))
+
+tapply(sp.call$indiv[sp.call$age < 70], list(age.class, sp.call$sex[sp.call$age < 70]), function(x) length(unique(x)))
+
+tapply(sp.call$indiv[sp.call$age < 70], list(age.class, sp.call$sex[sp.call$age < 70]), function(x) length(x))
+
+tapply(sp.call$indiv[sp.call$age < 70], list(age.class, sp.call$sex[sp.call$age < 70], sp.call$indiv[sp.call$age < 70]), function(x) length(x))
+
+tapply(sp.call$indiv[sp.call$age < 70], list(age.class), function(x) length(x))
+
+
+vrs <- c("duration", "meanfreq",  "entropy", "num.elms", "skew", "song.rate", "sex")
+
+pp <- preProcess(sp.call[, vrs], method = "BoxCox", cutoff = 0.7)
+
+sp.call2 <- predict(pp, sp.call)
+
+# split by age class
+dats <- split(sp.call2, f = list(sp.call2$age.class))
+
+# remove rows with NAs
+dats <- lapply(dats, function(x) x[complete.cases(x), ])
+
+# minimum sample size per individual
+min.n <- min(sapply(dats, function(x) table(x$sex)))
+
+# replicate
+out2 <- replicate(100, {out <- lapply(dats, function(X)
+{  
+  
+  age.class <- unique(ac)[X$age.class[1]]
+  X$age.class <- NULL
+  
+  # selec min.n samples per individual
+  X <- X[rownames(X) %in% unlist(tapply(rownames(X), X$sex, sample, min.n)), vrs]
+  
+  # run random forest
+  rf <- ranger(sex ~ ., data = X, num.trees = 1000, importance = "impurity")
+  rf.error <- rf$prediction.error
+  
+  # discriminant function
+  dfa <- lda(sex ~ ., data = X, CV =TRUE)
+  df.error <-  1- sum(diag(table(X$sex, dfa$class, dnn = c('Actual Group','Predicted Group')))) / nrow(X) 
+  
+return(data.frame(age.class, sample.size = nrow(X), method = c("RandomForest", "DFA"), cv.error = c(rf.error, df.error)))
+})
+
+do.call(rbind, out)
+
+}, simplify = FALSE)
+
+rep.res <- do.call(rbind, out2)
+
+agg <- aggregate(cv.error ~ age.class + method + sample.size, data = rep.res, mean)
+agg$sd <- aggregate(cv.error ~ age.class + method + sample.size, data = rep.res, sd)$cv.error
+
+write.csv(agg, "Sex classification accuracy by ontogenetic period.csv", row.names = FALSE)
+```
+
+## Sex differences
+
+```{r ontogeny of sex differences plots, eval = TRUE, echo = FALSE}
+
+agg <- read.csv("Sex classification accuracy by ontogenetic period.csv", stringsAsFactors = FALSE)
+
+agg$age.class <- factor(agg$age.class, levels = unique(agg$age.class))
+
+agg$cv.error <- round(agg$cv.error, 2)
+agg$sd <- round(agg$sd, 3)
+
+ggplot(agg, aes(x = age.class, y = cv.error, col = method)) + 
+  geom_point(size = 2.5, position = position_dodge(width = 1)) +
+  geom_errorbar(aes(ymin = cv.error - sd, ymax = cv.error + sd), width=.05, size = 1.2, position = position_dodge(width = 1)) +
+    scale_color_manual(values = inferno(10, alpha = 0.5)[c(3, 8)]) +
+  labs(x = "Age class (days)", y = "Classification error (CV)") +
+  theme_classic(base_size = 12) 
+
+```
+
+### Sample sizes
+
+```{r, eval = TRUE, echo = FALSE}
+
+kbl <- kable(agg[, 1:4], align = "c", row.names = F,  format = "html")
+
+kbl <-  kable_styling(kbl, bootstrap_options = "striped", font_size = 14)
+
+kbl
+```

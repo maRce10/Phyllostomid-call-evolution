@@ -1,0 +1,136 @@
+---
+title: Quantifying degradation in synthetic sounds
+subtitle: baRulho:quantifying habitat-induced degradation of (animal) acoustic signals
+author: Marcelo Araya-Salas
+date: "`r Sys.Date()`"
+toc: true
+toc-depth: 3
+toc-location: left
+number-sections: true
+highlight-style: pygments
+format:
+  html:
+    code-fold: show
+    code-tools: true
+    code-copy: true
+    embed-resources: true
+editor_s: 
+  chunk_output_type: console
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r add link to github repo, echo = FALSE, results='asis'}
+
+# print link to github repo if any
+if (file.exists("../.git/config")) {
+  config <- readLines("../.git/config")
+  url <- grep("url", config, value = TRUE)
+  url <- gsub("\\turl = |.git$", "", url)
+  cat("\nSource code and data found at [", url, "](", url, ")", sep = "")
+}
+
+```
+
+
+<!-- this code add line numbers to code blocks -->
+<!-- only works when code folding is not used in yaml (code_folding: show) -->
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+```{r setup style, echo = FALSE, message = FALSE, warning=FALSE}
+
+# s to customize chunk outputs
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors", # for code line numbers
+  tidy.opts = list(width.cutoff = 65), 
+  tidy = TRUE,
+  message = FALSE,
+  warning = FALSE
+ )
+
+```
+
+
+```{r load packages and setup style, echo = FALSE, message = FALSE, warning=FALSE}
+
+# github packages must include user name ("user/package")
+# knitr is require for creating html/pdf/word reports
+# kableExtra is used to print pretty formatted tables 
+# formatR is used for soft-wrapping code
+# klippy is used for adding a copy button to each code block
+pkgs <- c("remotes", "kableExtra", "knitr", "formatR", "rprojroot", github = "maRce10/warbleR", "viridis", github = "maRce10/ohun")
+
+source("~/Dropbox/R_package_testing/sketchy/R/load_packages.R")
+# source("https://raw.githubusercontent.com/maRce10/sketchy/main/R/load_packages.R")
+
+
+# install/ load packages
+load_packages(packages =pkgs)
+
+knitr::opts_knit$set(root.dir = "..")
+```
+
+# Format acoustic data
+```{r, eval = FALSE}
+
+est <- readRDS("./data/processed/curated_extended_selection_table.RDS")
+
+feature_reference(est)
+
+est <- resample_est(est, samp.rate = 420)
+
+
+saveRDS(est, "./data/processed/curated_extended_selection_table_420_kHz.RDS")
+
+```
+
+# Create spectrograms
+```{r}
+
+est <- readRDS("./data/processed/curated_extended_selection_table_420_kHz.RDS")
+
+# loop to create catalogs
+out <- pbapply::pblapply(unique(est$especie), function(i){
+  
+  X <- est[est$especie == i, ]
+  nrw <- ncl <- 2
+  
+  n <- nrow(X)
+  if(n > 64) n <- 64
+  
+  if(n > 4) {
+    nrw <- ncl <- ceiling(sqrt(n))
+  if(((nrw-1) * ncl) >= n) nrw <- nrw - 1
+  }
+  
+  X <- X[order(X$selec.file), ]
+  
+  mako2 <- function(...) mako(alpha = 0.5, begin = 0.3, ...)
+  catalog(X = X, nrow = nrw, ncol = ncl, same.time.scale = T, mar = 0.001, res = 100, group.tag = "selec.file", pb = FALSE, sub.legend = T, spec.mar = 1, labels = c("selec.file", "selec"), max.group.cols = 3, title = i, ovlp = 70, wl = 100, width = 10 * 2.3, height = 5 * 2.5, tag.pal = list(viridis, mako, mako2), hatching = 0, cex = 1.3, fast.spec = T, pal = viridis, img.prefix = i, rm.axes = TRUE, flim = c(5, 210))  
+  
+  move_images(from = ".", to = "./output/catalogs", overwrite = TRUE, cut = TRUE, pb = FALSE)
+  
+ } 
+)
+
+sp <- spectro_analysis(est[1:100, ], wl = 100, parallel = 20)
+
+```
+
+
+---
+ <!-- add packages used, system details and versions  -->
+ 
+<font size="4">Session information</font>
+
+```{r session info, echo=F}
+
+sessionInfo()
+
+```

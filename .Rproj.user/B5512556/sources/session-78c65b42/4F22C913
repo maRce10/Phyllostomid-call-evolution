@@ -1,0 +1,27 @@
+{
+    "id": "4F22C913",
+    "path": "~/Dropbox/Projects/Phyllostomid call evolution/scripts/Acoustic analysis.Rmd",
+    "project_path": "scripts/Acoustic analysis.Rmd",
+    "type": "r_markdown",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1689972770394.0,
+    "source_on_save": false,
+    "relative_order": 1,
+    "properties": {
+        "chunk_output_type": "console",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "6,28",
+        "scrollLine": "0"
+    },
+    "folds": "78|53|205|0|\n209|6|226|0|\n230|6|258|0|\n264|6|292|0|\n295|45|379|0|\n",
+    "lastKnownWriteTime": 1578126428,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1693426396274,
+    "read_only": false,
+    "read_only_alternatives": []
+}

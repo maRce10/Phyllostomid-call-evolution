@@ -1,0 +1,380 @@
+---
+title: "Bat call analysis"
+author: "Marcelo Araya-Salas"
+date: "Aug 11, 2017"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r packages,message=FALSE,warning=FALSE, echo=FALSE, eval = T}
+
+rm(list = ls())
+gc()
+
+x <- c("warbleR", "Rraven", "readxl")#, "parallel", "MASS", "pbapply", "smacof", "vegan", "pbmcapply", "ggplot2", )
+
+aa <- lapply(x, function(y) {
+  if(!y %in% installed.packages()[,"Package"])  {if(!y %in% c("warbleR", "Rraven")) install.packages(y) else devtools::install_github(paste0("maRce10/", y))
+}
+try(require(y, character.only = T), silent = T)
+  })
+
+```
+
+```{r read data and import raven selections}
+
+if (Sys.info()[1] == "Windows")
+warbleR_options(wav.path = "C:/Users/Nazareth/Documents/Datos acusticos/", flim = c(1, 193), parallel = 3, wl = 300) else
+  warbleR_options(wav.path = "~/Desktop/Phyllostomid_recs/grabaciones/converted_sound_files/", flim = c(1, 193),parallel = 3, wl = 300)
+
+
+wi <- wav_info(path = .Options$warbleR$wav.path)
+
+
+######################
+Bc<-read.csv("C:/Users/Nazareth/Documents/Datos acusticos/BD/Base de datos consolidada grabaciones phyllostomidos.csv")
+
+Bc <- match_wav_case(Bc, "C:/Users/Nazareth/Documents/Datos acusticos/")
+
+
+Bc1 <- select(Bc, -duration, -sample.rate, -channels, -bits, -wav.size, -samples)
+names(Bc1)
+BDcomp <- merge(Bc1, wi, by = "sound.files", all.y = TRUE)
+
+names(BDcomp)
+BDcomp<-BDcomp[, c(1:6, 15:20, 7:14)]
+
+BDcomp$Time.expansion.1 <- NULL
+
+sapply(BDcomp, anyNA)
+
+sapply(BDcomp, function(x) sum(is.na(x)))
+
+
+table(BDcomp$Fuente, BDcomp$sample.rate)
+
+out <- lapply(unique(BDcomp$Fuente), function(x){
+  
+  Y <- BDcomp[BDcomp$Fuente == x, ]
+  
+  Y <- Y[Y$sample.rate < 250, ]
+  
+  return(Y[, c("sound.files", "sample.rate", "Time.expansion")])
+  
+  })
+
+
+names(out) <- unique(BDcomp$Fuente)
+
+
+out[["BL"]]
+
+
+# write.csv(BDcomp, "C:/Users/Nazareth/Documents/Datos acusticos/BD/Base de datos consolidada grabaciones phyllostomidos.csv")
+
+
+```
+
+```{r read data and import raven selections round 21}
+
+# leeer archivo de excel con base de datos
+bd <- read_excel("C:/Users/Nazareth/Dropbox/Phyllostomid call evolution/Base de datos consolidada grabaciones phyllostomidos.xlsx")
+
+
+# quitar los q no se van a utilizar
+bd <- bd[bd$Util != "No", ]
+
+
+# bd$Util[is.na(bd$nombre.seleccion)]
+
+
+if (Sys.info()[1] == "Windows")
+warbleR_options(wav.path = "C:/Users/Nazareth/Documents/Datos acusticos/", flim = c(1, 193), parallel = 3, wl = 300) else
+  warbleR_options(wav.path = "~/Desktop/Phyllostomid_recs/grabaciones/converted_sound_files/", flim = c(1, 193),parallel = 3, wl = 300)
+
+
+# lista de archivos wav
+wvs <- list.files(path = .Options$warbleR$wav.path, pattern = ".wav$", ignore.case = TRUE)
+
+# todos los archivos de sonido de la base de datos tienen un archivo correspondiente?????
+#all(bd$sound.files %in% wvs)
+
+## cuales tienen selecciones?
+# leer archivos de seleccion de Raven
+sls <- list.files("C:/Users/Nazareth/Documents/Datos acusticos/Selecciones", pattern = "txt$")
+
+sls2 <- gsub("\\.txt$","", sls)
+
+
+#nombre de seleccion
+
+ns <- bd$nombre.seleccion[!is.na(bd$nombre.seleccion)]
+
+all(sls2 %in% ns)
+
+
+sls <- imp_raven(path = "C:/Users/Nazareth/Documents/Datos acusticos/Selecciones/", all.data = TRUE, warbler.format = TRUE)
+
+
+# anadir campo sobre cuales selecciones hay q corregir
+sls$correg.caja <- sapply(1:nrow(sls), function(x) {
+  
+  bd$Corregir.caja[bd$nombre.seleccion == gsub("\\.txt$", "", sls$selec.file[x])][1]
+})
+
+# revisar cuentas por categoria de corregir
+table(sls$correg.caja)
+
+# renombrar selecciones
+sls$old.selec <- sls$selec
+sls$selec <- 1:nrow(sls)
+
+#revisar selecciones
+sls <- check_sels(sls)
+table(sls$check.res)
+
+unique(sls$sound.files[sls$check.res == "sound file not found"])
+unique(sls$sound.files[sls$check.res != "OK"])
+
+# arreglar nombre de archivo tomandolo de la base de datos de excel
+sls$sound.files[sls$check.res == "sound file not found"] <- sapply(which(sls$check.res == "sound file not found"), function(x) {
+  
+  
+  
+  
+  bd$sound.files[bd$nombre.seleccion == gsub("\\.txt$", "", sls$selec.file[x])][1]})
+
+# quitar los dedazos en las seleccions
+sls <- sls[sls$check.res %in% c("OK", "sound file not found"), ] 
+
+#revisar de nuevo
+sls$check.res <- NULL
+sls <- check_sels(sls)
+
+
+# arreglar nombre de archivo tomandolo de la base de datos de excel
+sls$especie <- sapply(1:nrow(sls), function(x) {
+  
+  bd$Spp[bd$nombre.seleccion == gsub("\\.txt$", "", sls$selec.file[x])][1]
+})
+
+
+sls$sound.files <- sapply(1:nrow(sls), function(x) {
+  
+  bd$sound.files[bd$nombre.seleccion == gsub("\\.txt$", "", sls$selec.file[x])][1]
+})
+
+sls$fuente <- sapply(1:nrow(sls), function(x) {
+  
+  bd$Fuente[bd$nombre.seleccion == gsub("\\.txt$", "", sls$selec.file[x])][1]
+})
+
+sls$expansion <- sapply(1:nrow(sls), function(x) {
+  
+  bd$Time.expansion[bd$nombre.seleccion == gsub("\\.txt$", "", sls$selec.file[x])][1]
+})
+
+#sls$correg.caja[is.na(sls$correg.caja)] <- "vacios"
+
+write.csv(sls, "C:/Users/Nazareth/Documents/Datos acusticos/selecciones ene2020.csv", row.names = FALSE)
+
+
+mar<- mean(sls)
+
+#para hacer spectros, revisar xq no abre archivo linea de cargar bd la puse yo 
+
+#sls <- read.csv("C:/Users/Nazareth/Documents/Datos acusticos/selecciones nov2019.csv", stringsAsFactors = FALSE)
+
+#espectros 
+specreator(sls, ovlp = 90, fast.spec =F, dest.path = "C:/Users/Nazareth/Documents/Datos acusticos/spectros/", mar = 0.001, collevels = seq(-100, 0, 5), wl = 123)
+
+lspec(X = sels_call, sxrow = 1.2, rows = 10, ovlp = 0, fast.spec = TRUE, labels = "call", horizontal = TRUE, overwrite = TRUE)
+
+move_imgs(from = .Options$warbleR$wav.path, to = "./long_spectrograms")
+
+
+exp_raven(sels_call, file.name = "call ID checking raven st", sound.file.path =  .Options$warbleR$wav.path)
+
+
+fix_path(new.begin.path = "C:/Users/Nazareth/Desktop/Trabajando_para_tesis/grab_trab", sound.file.col = "Begin File")
+
+
+
+
+
+```
+
+
+## leer selecciones y revisar
+```{r}
+
+sls <- read.csv("C:/Users/Nazareth/Documents/Datos acusticos/selecciones sep2019.csv", stringsAsFactors = FALSE)
+
+
+
+table(sls$correg.caja, useNA = "ifany")
+
+sls.si <- sls[sls$correg.caja == "Si", ]
+sls.rev <- sls[sls$correg.caja == "Rev", ]
+sls.vacios <- sls[sls$correg.caja == "vacios", ]
+
+
+st <- sel_tailor(X = sls.rev, ovlp = 70, osci = FALSE,mar = 0.004, path = "C:/Users/Nazareth/Documents/Datos acusticos/",  flim = c(1, 193), wl = 123, collevels = seq(-100, 0, 5), auto.next = TRUE, pause = 0)
+
+unlink("C:/Users/Nazareth/Documents/Datos acusticos/seltailor_output.csv")
+
+```
+
+
+
+```{r}
+
+bd.phy <- read_xlsx("Base de datos consolidada grabaciones phyllostomidos.xlsx")
+
+head(bd)
+
+bdGC <- read_xlsx("~/Dropbox/Projects/Bat distress call evolution/Databases bats Chaverri lab.xlsx", sheet = "Recordings")
+
+
+bd.phy$species <- sapply(1:nrow(bd.phy), function(x){
+  
+  y <- bd.phy$Archivo.orig[x]
+  if (!grepl("//.wav$", y, ignore.case = TRUE)) y <- paste0(y, ".WAV")
+  
+  sp <- bdGC$Species[bdGC$Original_sound_files == y]
+  
+  if (length(sp) == 0) return(NA) else
+  if (length(sp) > 1) return("2 o mas nombres coinciden") else
+    return(sp)
+})
+
+table(bd.phy$species)
+
+
+# write.csv(bd.phy, "XXX.csv", row.names = FALSE)
+# 
+# View(bd.phy[bd.phy$Fuente == "GChaverri", c(1:5, 20)])
+
+```
+
+
+
+
+
+```{r}
+# fixwavs(files = sels$sound.files, samp.rate = 400, bit.depth = 16, mono = TRUE)
+
+lapply(wi[,c("sample.rate", "channels", "bits")], unique)
+
+#importar selecciones 
+crr.sels <- read.csv("./Data/correcciones_a_selecciones_raven.csv", header = T, sep = ",")
+
+
+# leer selecciones de Raven con formato warbleR
+rvn_sls <- imp_raven(path = "./selecciones/", sound.file.col = "Begin File")
+
+# leer selecciones de Raven con datos originales
+rvn_sls2 <- imp_raven(path = "./selecciones/", sound.file.col = "Begin File", all.data = TRUE)
+
+# mover "Song" a "call" en datos formato warbleR
+rvn_sls$call <- rvn_sls2$Song
+
+cs <- check_sels(rvn_sls)
+
+rvn_sls$rmvd <- sapply(1:nrow(rvn_sls), function(x) {
+  if (paste(rvn_sls$sound.files[x], rvn_sls$selec[x]) %in% paste(crr.sels$sound.files, crr.sels$selec)) NA else "rmvd"
+  
+})
+
+# # corregir las extensiones (wav, WAV)
+rvn_sls <- match_wav_case(rvn_sls, path = .Options$warbleR$wav.path)
+
+```
+
+# definir nombre llamada automaticamente
+```{r definir nombre llamada automaticamente}
+# 
+# y <- rep(1, nrow(X)) + rnorm(nrow(X), sd = 0.5)
+#  
+# plot(x = X$start, y = y, pch = 20, col = adjustcolor("red", alpha.f = 0.5), cex = 1, ylim = c(-10, 10))
+# abline(h = 0, lty = 2)
+# 
+# plot(x = X$start, y = y, pch = 20, col = adjustcolor("red", alpha.f = 0.5), cex = 1, ylim = c(-10, 10), xlim= c(4 , 5.5))
+# 
+# points(x = X$start, y = rep(-1, nrow(X)), pch = 20, col = adjustcolor("blue", alpha.f = 0.5), cex = 1, ylim = c(-10, 10))
+# 
+# text(labels = round(X$gap * 100, 1), x = X$start, y = y + 2, cex = 0.7)
+#  abline(h = 0, lty = 2)
+# 
+#  
+#  quantile(table(rvn_sls$sound.files))
+ 
+out <- lapply(unique(rvn_sls$sound.files), function(x)
+{
+  # extract data for single song type
+  X <- rvn_sls[rvn_sls$sound.files == x, ]
+
+  X <- X[order(X$start), ]
+  # measure gaps
+  X$gap <- c(NA, X$start[-1] - X$end[-nrow(X)])
+
+  # GENERAL RULE
+  # get the 5 smallest gaps for detecting different calls
+  mean.min.gap <- mean(sort(X$gap)[1:5]) * 2
+  
+  ## Rule for Anou.geo
+  if (grepl("Anou.geo", x)) mean.min.gap <- 0.45
+    if (grepl("Anou.geo.BL.002.wav", x)) mean.min.gap <- 0.25 #
+  if (grepl ("Arit.fla", x )) mean.min.gap <- 0.048
+  if (grepl ("Caro.per.GC.002", x )) mean.min.gap <- 0.035 #
+  if (grepl ("Chor.aur", x )) mean.min.gap <- 0.08
+  if (grepl ("Desm.rot", x )) mean.min.gap <- 0.04
+  if (grepl ("Erop.sez", x )) mean.min.gap <- 0.06
+  if (grepl ("Lonc.mor", x )) mean.min.gap <- 0.027
+  if (grepl ("Macr.mac", x )) mean.min.gap <- 0.042
+  if (grepl ("Macr.wat", x )) mean.min.gap <- 0.027
+  if (grepl ("Micr.meg.BL.001", x )) mean.min.gap <- 0.09
+  if (grepl ("Micr.meg.BL.002", x )) mean.min.gap <- 0.25
+  if (grepl ("Micr.min", x )) mean.min.gap <- 0.017
+  if (grepl ("Mono.red", x )) mean.min.gap <- 1.2
+  if (grepl ("Stur.lil", x )) mean.min.gap <- 0.07
+  if (grepl ("Stur.lud", x )) mean.min.gap <- 0.1
+  if (grepl ("Tona.sau", x )) mean.min.gap <- 0.045
+  if (grepl ("Vamp.spe", x )) mean.min.gap <- 0.32
+  
+  # set first call ID as 1
+  X$call <- 1
+
+  # rule: different ID if gaps is higher than twice the mean.min.gap
+    for(i in 2:nrow(X))
+   X$call[i] <- if(X$gap[i] > mean.min.gap) X$call[i - 1] + 1  else X$call[i - 1]
+
+  # segment for creating sub spectros for checkin call IDs in segments bigger than mean.min.gap but no longer than 10 s
+# all NAs only first one is 1
+  X$segmt <- NA  
+X$segmt[1] <- 1
+
+  for(i in 2:nrow(X))
+   X$segmt[i] <- if(X$gap[i] >  mean.min.gap * 12.75 / 2 | (diff(range(X$start[X$segmt == X$segmt[i - 1]  & !is.na(X$segmt)])) > 10 & X$call[i - 1] != X$call[i])) X$segmt[i - 1] + 1  else X$segmt[i - 1]
+  
+  return(X)
+})
+
+
+sels_call <- do.call(rbind, out)
+
+dp <- file.path(getwd(), "specreator")
+
+specreator(sels_call, ovlp = 50, by.song = "segmt", xl = 3, fast.spec = FALSE, dest.path = dp, title.labels = c("sound.files", "segmt"), sel.labels = "call", collevels = seq(-100, 0, 5))
+
+lspec(X = sels_call, sxrow = 1.2, rows = 10, ovlp = 0, fast.spec = TRUE, labels = "call", horizontal = TRUE, overwrite = TRUE)
+
+move_imgs(from = .Options$warbleR$wav.path, to = "./long_spectrograms")
+
+
+exp_raven(sels_call, file.name = "call ID checking raven st", sound.file.path =  .Options$warbleR$wav.path)
+
+
+fix_path(new.begin.path = "C:/Users/Nazareth/Desktop/Trabajando_para_tesis/grab_trab", sound.file.col = "Begin File")
+```
