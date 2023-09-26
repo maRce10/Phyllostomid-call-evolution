@@ -1,16 +1,38 @@
 {
     "dialog-state": {
-        "query": "curated_extended_selection_table",
-        "path": "~/Dropbox/Projects",
+        "query": "catalog(",
+        "path": "/scripts",
         "regex": false,
         "caseSensitive": false,
         "wholeWord": false,
-        "filePatterns": [],
-        "useGitGrep": false,
+        "filePatterns": [
+            "*.r",
+            "*.R",
+            "*.rnw",
+            "*.Rnw",
+            "*.rmd",
+            "*.Rmd",
+            "*.rmarkdown",
+            "*.Rmarkdown",
+            "*.qmd",
+            "*.Qmd",
+            "*.md",
+            "*.rhtml",
+            "*.Rhtml",
+            "*.h",
+            "*.hpp",
+            "*.c",
+            "*.cpp",
+            "*.js",
+            "*.yml",
+            "*.yaml"
+        ],
+        "useGitGrep": true,
         "excludeGitIgnore": true,
         "excludeFilePatterns": [],
-        "resultsCount": 12,
+        "resultsCount": 2,
         "errorCount": 0,
-        "replaceErrors": ""
+        "replaceErrors": "",
+        "projectRelative": true
     }
 }

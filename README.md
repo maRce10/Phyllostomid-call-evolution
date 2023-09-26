@@ -18,10 +18,15 @@ Code used for detecting analyzing acoustic structure of phyllostomid bat echoloc
 
 ## In progress
 
-* Fix extended selection table
+* ~~Fix extended selection table~~
 
 ## To-do list
 - Spot weird/suspicious annotations (Jorge)
+- Check that species names in our extended selection table ("./data/processed/curated_extended_selection_table_72_species_sep_2023.RDS") match those in "./data/processed/trait_data_base_2023.xlsx"
+- check if all target species found in "PanTHERIA_1-0_WR05_Aug2008.csv" are also in "./data/processed/trait_data_base_2023.xlsx" (and add if not)
+- Merge "./deprecated/data simulation Nazareth/phyllostomidae1.csv" into "./data/processed/trait_data_base_2023.xlsx"
+- Check possible issue with sound file expansion by checking freq of species with multiple recordings (ideally with different time expansions)
+
 
 ## Status
 Project is: _in progress_

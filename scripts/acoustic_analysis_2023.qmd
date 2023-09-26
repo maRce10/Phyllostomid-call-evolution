@@ -64,41 +64,71 @@ knitr::opts_chunk$set(
 # kableExtra is used to print pretty formatted tables 
 # formatR is used for soft-wrapping code
 # klippy is used for adding a copy button to each code block
-pkgs <- c("remotes", "kableExtra", "knitr", "formatR", "rprojroot", github = "maRce10/warbleR", "viridis", github = "maRce10/ohun")
+pkgs <- c("remotes", "kableExtra", "knitr", "formatR", "rprojroot", github = "maRce10/warbleR", "viridis", github = "maRce10/ohun", github = "maRce10/Rraven", "readxl", "ape", "ggtree", github = "maRce10/suwo")
 
-source("~/Dropbox/R_package_testing/sketchy/R/load_packages.R")
-# source("https://raw.githubusercontent.com/maRce10/sketchy/main/R/load_packages.R")
+#source("~/Dropbox/R_package_testing/sketchy/R/load_packages.R")
+source("https://raw.githubusercontent.com/maRce10/sketchy/main/R/load_packages.R")
 
 
 # install/ load packages
 load_packages(packages =pkgs)
 
 knitr::opts_knit$set(root.dir = "..")
+
 ```
 
 # Format acoustic data
 ```{r, eval = FALSE}
 
-est <- readRDS("./data/processed/curated_extended_selection_table.RDS")
+org_est <- readRDS("./data/processed/curated_extended_selection_table.RDS")
 
-feature_reference(est)
+# feature_reference(org_est)
 
-est <- resample_est(est, samp.rate = 420)
+est <- resample_est(org_est, samp.rate = 420, parallel = 20)
+
+# Rraven::exp_est(est[est$sound.files == "M00030.WAV-song_Arti.lit.GC.010.txt",], path = "./data/processed",file.name = "M00030.WAV-song_Arti.lit.GC.010", selection.table = TRUE)
+# 
+# Rraven::exp_est(est[est$sound.files == "R0029331__08-01-201300-42-12__M00017.WAV-song_Lich.obs.GC.006.txt",], path = "./data/processed",file.name = "R0029331__08-01-201300-42-12__M00017.WAV-song_Lich.obs.GC.006", selection.table = TRUE)
+# 
+fix_sfs <- imp_raven(path = "./data/processed", files = c("Lich.obs.GC.006_Fixed.txt", "Arti_lit.GC.010_Fixed.txt"), warbler.format = TRUE)
+# 
+# X<- fix_sfs
+# 
+# catalog(X = X, nrow = 9, ncol = 8, same.time.scale = T, mar = 0.001, res = 100, pb = FALSE, sub.legend = T, spec.mar = 1, ovlp = 90, wl = 100, width = 10 * 2.3, height = 5 * 2.5, hatching = 0, cex = 1.3, fast.spec = FALSE, pal = viridis, img.prefix = "delete", rm.axes = TRUE, path = "./data/processed", flim = c(min(X$bottom.freq), max(X$top.freq)) + c(-5, 5), highlight = TRUE, alpha = 0.25, collevels = seq(-120, 0, 5))
 
 
-saveRDS(est, "./data/processed/curated_extended_selection_table_420_kHz.RDS")
+sub_est <- est[!est$sound.files %in% c("R0029331__08-01-201300-42-12__M00017.WAV-song_Lich.obs.GC.006.txt", "M00030.WAV-song_Arti.lit.GC.010.txt"),]
+
+fix_sfs$selec.file[nrow(fix_sfs)] <- fix_sfs$selec.file[nrow(fix_sfs) - 1] 
+
+fix_est <- selection_table(fix_sfs, extended = TRUE, confirm.extended = FALSE, by.song = "selec.file", path = "./data/processed", mar = 0.005)
+
+setdiff(names(sub_est), names(fix_est))
+
+fix_est$especie <- ifelse(fix_est$sound.files == "R0029331__08-01-201300-42-12__M00017.WAV-song_Lich.obs.GC.006.txt.wav-song_Lich.obs.GC.006.txt", "Lichonycteris obscura", "Artibeus lituratus")
+
+fix_est$fuente <- "GChaverri"
+fix_est$expansion <- NA
+
+re_est <- rbind(sub_est, fix_est)
+
+
+saveRDS(re_est, "./data/processed/curated_extended_selection_table_420_kHz.RDS")
 
 ```
 
 # Create spectrograms
-```{r}
-
-est <- readRDS("./data/processed/curated_extended_selection_table_420_kHz.RDS")
-
+```{r, eval = FALSE}
 # loop to create catalogs
 out <- pbapply::pblapply(unique(est$especie), function(i){
   
   X <- est[est$especie == i, ]
+
+  X <- signal_2_noise(X, eq.dur = TRUE, bp = c(min(X$bottom.freq), max(X$top.freq)), pb = FALSE)
+
+  X$xlabel <- paste(gsub(".txt$", "", X$selec.file), "snr:", round(X$SNR, 2))
+ X$discrete.snr <- cut(X$SNR, breaks = 5)
+  
   nrw <- ncl <- 2
   
   n <- nrow(X)
@@ -108,18 +138,155 @@ out <- pbapply::pblapply(unique(est$especie), function(i){
     nrw <- ncl <- ceiling(sqrt(n))
   if(((nrw-1) * ncl) >= n) nrw <- nrw - 1
   }
+
+    
+  X <- X[order(X$SNR), ]
   
-  X <- X[order(X$selec.file), ]
-  
-  mako2 <- function(...) mako(alpha = 0.5, begin = 0.3, ...)
-  catalog(X = X, nrow = nrw, ncol = ncl, same.time.scale = T, mar = 0.001, res = 100, group.tag = "selec.file", pb = FALSE, sub.legend = T, spec.mar = 1, labels = c("selec.file", "selec"), max.group.cols = 3, title = i, ovlp = 70, wl = 100, width = 10 * 2.3, height = 5 * 2.5, tag.pal = list(viridis, mako, mako2), hatching = 0, cex = 1.3, fast.spec = T, pal = viridis, img.prefix = i, rm.axes = TRUE, flim = c(5, 210))  
-  
+  mako2 <- function(...) heat.colors(alpha = 0.5, ...)
+  catalog(X = X, nrow = nrw, ncol = ncl, same.time.scale = T, mar = 0.001, res = 100, group.tag = "discrete.snr", pb = FALSE, sub.legend = T, spec.mar = 1, labels = c("xlabel", "selec"), max.group.cols = 5, title = i, ovlp = 90, wl = 100, width = 10 * 2.3, height = 5 * 2.5, tag.pal = list(viridis, mako, mako2), hatching = 0, cex = 1.3, fast.spec = FALSE, pal = viridis, img.prefix = i, rm.axes = TRUE, flim = c(min(X$bottom.freq), max(X$top.freq)) + c(-5, 5), highlight = TRUE, alpha = 0.25, collevels = seq(-120, 0, 5))  
   move_images(from = ".", to = "./output/catalogs", overwrite = TRUE, cut = TRUE, pb = FALSE)
   
  } 
 )
 
-sp <- spectro_analysis(est[1:100, ], wl = 100, parallel = 20)
+# sp <- spectro_analysis(est[1:100, ], wl = 100, parallel = 20)
+
+```
+
+
+```{r, eval= FALSE}
+# leer el csv
+selection_errors_list <- read.csv("/home/m/Downloads/SeleccionesAusentes.csv")
+
+for (i in unique(X$archivo)
+)
+file.copy(from = file.path("smb://cinnas.local/neurobiología/marcelo_araya/recordings/Phyllostomid_recs/grabaciones/converted_sound_files", i), to = file.path("./data/raw/recordings", i))
+
+
+```
+
+# measure acoustic features
+```{r, eval = FALSE}
+est <- readRDS("./data/processed/curated_extended_selection_table_420_kHz.RDS")
+
+af <- spectro_analysis(est, parallel = 22, ovlp = 70, wl = 100)
+```
+
+# check species
+```{r}
+est <- readRDS("./data/processed/curated_extended_selection_table_420_kHz.RDS")
+
+phy <- ape::read.tree("./deprecated/Datos Rabosky/treePL_ML/chiroptera.no_outgroups.absolute.tre")
+
+est$species <- gsub(" ", "_", est$especie)
+
+dat_spp <- unique(est$species)
+
+setdiff(dat_spp, phy$tip.label)
+
+
+fix_names <- read_excel("./data/processed/Analysis_Species_Names_Errors_Database_Phylogeny.xlsx")
+
+# #Check all Dermanura species available
+# y <- "Microny"
+# 
+# # in tree
+# unlist(lapply(phy$tip.label, function(x) grep(y, x, value = TRUE)))
+# 
+# # in  data
+# unique(unlist(lapply(est$species, function(x) grep(y, x, value = TRUE))))
+# 
+# arts <- unlist(lapply(phy$tip.label, function(x) grep("Sturnira",x, value = TRUE)))
+
+
+# fix name in phylogeny
+phy$tip.label[phy$tip.label == "Micronycteris_nicefori"] <- "Trinycteris_nicefori"
+
+# removing from data species missing in tree 
+est <- est[!est$species %in% fix_names$Species_Data[is.na(fix_names$Species_Phylogenetic_Tree) ], ]
+
+# keep species to rename in data
+fix_names <- fix_names[!is.na(fix_names$Species_Phylogenetic_Tree), ]
+fix_names <- fix_names[fix_names$wrong == "data set", ]
+
+est$species[grep("nicefori", est$species)] <- "Trinycteris_nicefori"
+
+# fix names in data set
+for (i in 1:nrow(fix_names))
+est$species[est$species == fix_names$Species_Data[i]] <- fix_names$Species_Phylogenetic_Tree[i]
+  
+length(unique(est$species))
+
+
+
+saveRDS(est, "./data/processed/curated_extended_selection_table_72_species_sep_2023.RDS")
+
+# trim phylo
+setdiff(unique(est$species), phy$tip.label)
+
+sub_phy <- drop.tip(phy, tip = setdiff(phy$tip.label, unique(est$species)))
+
+write.tree(sub_phy, "./data/processed/trimmed_phylogeny_72_species_chiroptera.no_outgroups.absolute.tre")
+
+
+```
+
+
+# Check taxonomic coverage
+```{r}
+
+phy <- ape::read.tree("./deprecated/Datos Rabosky/treePL_ML/chiroptera.no_outgroups.absolute.tre")
+
+phy$tip.label[phy$tip.label == "Micronycteris_nicefori"] <- "Trinycteris_nicefori"
+
+sub_phy <- read.tree("./data/processed/trimmed_phylogeny_72_species_chiroptera.no_outgroups.absolute.tre")
+
+all_phyllost <- read_excel("./data/processed/list_phyllostomidae_species_catalog_of_life.xlsx")[, 1:2]
+
+all_phyllost$genus <- sapply(strsplit(all_phyllost$Species, " "), "[[", 1)
+
+phyllost_in_tree <- grep(paste(unique(all_phyllost$genus), collapse = "|"), phy$tip.label, value = TRUE)
+
+phyllost_mrca <- getMRCA(phy, tip = phyllost_in_tree)
+
+phyllost_phy <- extract.clade(phy, node = phyllost_mrca)
+
+tree2 <- groupOTU(phyllost_phy, .node = sub_phy$tip.label)
+
+attr(tree2, "Condition")  <- ifelse(attributes(tree2)$group == 1, "In data", "Missing")
+
+table(attr(tree2, "Condition"))
+
+ggtree(tree2, aes(color=Condition), layout = "fan") + geom_tiplab(offset = 0) + scale_color_manual(values= c("gray", "gray")) + xlim(c(NA, 37))
+ggtree(tree2, aes(color=Condition), layout = "fan") + geom_tiplab(offset = 0) + scale_color_manual(values= c(viridis(10)[7], "gray")) + xlim(c(NA, 37))
+
+missing <- setdiff(phyllost_phy$tip.label, sub_phy$tip.label)
+
+write.csv(data.frame(missing = missing), "./data/processed/missing_species.csv")
+
+# search missing ones
+l <- pbapply::pblapply(gsub("_", " ", missing), function(x) query_xenocanto(x, pb = FALSE, all_data = FALSE))
+
+all(sapply(l, is.null))
+
+```
+
+# Pantheria
+```{r}
+ 
+panth <- read.csv("./data/processed/PanTHERIA_1-0_WR05_Aug2008.csv", na.strings = "-999")
+
+panth$species <- gsub(" ", "_", panth$MSW05_Binomial)
+
+sub_panth <- panth[panth$species %in% (sub_phy$tip.label), ]
+nrow(sub_panth)
+
+naz_dat$species <- gsub(" ", "_", naz_dat$org.names)
+naz_dat$alt_species <- gsub(" ", "_", naz_dat$alternative.name)
+
+naz_dat <- read_excel("./deprecated/check_new_files/base de datos.xlsx")
+sub_dat <- naz_dat[naz_dat$species %in% (sub_phy$tip.label) | naz_dat$alt_species %in% (sub_phy$tip.label), ]
+
 
 ```
 
